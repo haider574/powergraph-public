@@ -42,6 +42,7 @@ import sys
 import tarfile
 import time
 import urllib.request
+import zipfile
 from dataclasses import asdict
 from pathlib import Path
 from typing import List, Optional
@@ -161,45 +162,70 @@ def extract_ieee24_raw(tarball: Path, target_raw_dir: Path) -> None:
     for IEEE-24, so this saves disk and time."""
     target_raw_dir.mkdir(parents=True, exist_ok=True)
 
-    step(f"Inspecting tarball at {tarball}")
-    with tarfile.open(tarball, "r:gz") as tf:
-        members = tf.getmembers()
+    step(f"Inspecting archive at {tarball}")
+    wanted_basenames = set(RAW_FILES)
 
-        # Find the IEEE-24 subdirectory in the archive. The archive layout is
-        # not contractually fixed — different Figshare uploads have shipped
-        # both `cascades/ieee24/raw/<file>.mat` and
-        # `dataset_cascades/ieee24/ieee24/raw/<file>.mat`. Locate by basename.
-        wanted_basenames = set(RAW_FILES)
-        ieee24_members: dict[str, tarfile.TarInfo] = {}
-        for m in members:
-            if not m.isfile():
-                continue
-            base = os.path.basename(m.name)
-            if base not in wanted_basenames:
-                continue
-            # We want the IEEE-24 copy specifically, not (e.g.) the same
-            # filename for IEEE-39 / UK / IEEE-118.
-            if "ieee24" not in m.name.lower():
-                continue
-            # First match wins (avoid overwriting if archive nests duplicates).
-            ieee24_members.setdefault(base, m)
+    # Auto-detect ZIP vs tar.gz — Figshare serves a ZIP (magic bytes b'PK').
+    if zipfile.is_zipfile(tarball):
+        step("Detected ZIP archive (Figshare format).")
+        with zipfile.ZipFile(tarball, "r") as zf:
+            members = zf.infolist()
+            ieee24_members: dict[str, zipfile.ZipInfo] = {}
+            for m in members:
+                base = os.path.basename(m.filename)
+                if base not in wanted_basenames:
+                    continue
+                if "ieee24" not in m.filename.lower():
+                    continue
+                ieee24_members.setdefault(base, m)
 
-        missing = wanted_basenames - set(ieee24_members)
-        if missing:
-            raise RuntimeError(
-                f"Could not find these IEEE-24 raw files inside the tarball: "
-                f"{sorted(missing)}.\n"
-                f"Listing of .mat members in the archive:\n  " +
-                "\n  ".join(m.name for m in members
-                            if m.isfile() and m.name.endswith('.mat'))
-            )
+            missing = wanted_basenames - set(ieee24_members)
+            if missing:
+                raise RuntimeError(
+                    f"Could not find these IEEE-24 raw files inside the ZIP: "
+                    f"{sorted(missing)}.\n"
+                    f"Listing of .mat members in the archive:\n  " +
+                    "\n  ".join(m.filename for m in members
+                                if m.filename.endswith('.mat'))
+                )
 
-        for base, m in sorted(ieee24_members.items()):
-            out_path = target_raw_dir / base
-            step(f"Extracting {m.name} → {out_path} "
-                 f"({fmt_bytes(m.size)})")
-            with tf.extractfile(m) as src, open(out_path, "wb") as dst:
-                shutil.copyfileobj(src, dst)
+            for base, m in sorted(ieee24_members.items()):
+                out_path = target_raw_dir / base
+                step(f"Extracting {m.filename} → {out_path} "
+                     f"({fmt_bytes(m.file_size)})")
+                with zf.open(m) as src, open(out_path, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+    else:
+        step("Detected tar.gz archive.")
+        with tarfile.open(tarball, "r:gz") as tf:
+            members = tf.getmembers()
+            ieee24_members: dict[str, tarfile.TarInfo] = {}
+            for m in members:
+                if not m.isfile():
+                    continue
+                base = os.path.basename(m.name)
+                if base not in wanted_basenames:
+                    continue
+                if "ieee24" not in m.name.lower():
+                    continue
+                ieee24_members.setdefault(base, m)
+
+            missing = wanted_basenames - set(ieee24_members)
+            if missing:
+                raise RuntimeError(
+                    f"Could not find these IEEE-24 raw files inside the tarball: "
+                    f"{sorted(missing)}.\n"
+                    f"Listing of .mat members in the archive:\n  " +
+                    "\n  ".join(m.name for m in members
+                                if m.isfile() and m.name.endswith('.mat'))
+                )
+
+            for base, m in sorted(ieee24_members.items()):
+                out_path = target_raw_dir / base
+                step(f"Extracting {m.name} → {out_path} "
+                     f"({fmt_bytes(m.size)})")
+                with tf.extractfile(m) as src, open(out_path, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
 
 
 # --------------------------------------------------------------------------
