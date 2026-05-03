@@ -1,0 +1,18 @@
+# Pre-build dependencies for the WM9B7 Azure pre-build script.
+#
+# AzureML's `Python 3.10 - AzureML` kernel ships torch + torchvision +
+# numpy + scipy + scikit-learn + pandas pre-installed. The packages below
+# are the additional ones the FULL `powergraph_data.py` and
+# `train_ieee24_baselines.py` modules import, plus PyG itself.
+#
+# Pin torch-geometric to 2.6.1 — the trimmed `from_processed` path in the
+# notebook is tested against this exact version.
+#
+# torch-scatter / torch-sparse install against the resident torch+CUDA
+# combination on AzureML; do NOT pin them by version here. The prebuild
+# script's bash launcher derives the wheel index from `torch.__version__`
+# and `torch.version.cuda` at runtime (see PREBUILD_INSTRUCTIONS.md
+# "Phase A2 — install dependencies").
+
+torch-geometric==2.6.1
+h5py>=3.10
